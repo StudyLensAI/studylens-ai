@@ -1,0 +1,1 @@
+The MVP keeps content scripts minimal. Automatic webpage question detection can be added in the next phase.

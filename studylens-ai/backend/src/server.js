@@ -7,7 +7,6 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Allow requests from the Chrome extension and other origins
 app.use(
   cors({
     origin: true,
@@ -21,6 +20,21 @@ app.use(express.json({ limit: "1mb" }));
 
 function cleanAnswer(text) {
   return String(text || "").trim();
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelay(errorText, attempt) {
+  const match = errorText.match(/"retryDelay"\s*:\s*"(\d+)s"/);
+
+  if (match) {
+    return Number(match[1]) * 1000;
+  }
+
+  const fallbackDelays = [5000, 10000];
+  return fallbackDelays[Math.min(attempt, fallbackDelays.length - 1)];
 }
 
 app.get("/api/health", (_req, res) => {
@@ -79,40 +93,70 @@ ${context}
       "https://api.openai.com/v1"
     ).replace(/\/$/, "");
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.AI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: process.env.AI_MODEL,
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          },
-          {
-            role: "user",
-            content: userPrompt
-          }
-        ]
-      })
-    });
+    const requestBody = {
+      model: process.env.AI_MODEL,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: userPrompt
+        }
+      ]
+    };
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    let response;
+    let errorText = "";
 
-      console.error("AI provider error:", errorText);
-
-      return res.status(502).json({
-        error: "AI provider request failed.",
-        details: errorText.slice(0, 1000)
+    // Retry temporary AI provider errors up to 3 times.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.AI_API_KEY}`
+        },
+        body: JSON.stringify(requestBody)
       });
+
+      if (response.ok) {
+        break;
+      }
+
+      errorText = await response.text();
+
+      const temporaryError =
+        response.status === 429 ||
+        response.status === 500 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504;
+
+      if (!temporaryError || attempt === 2) {
+        console.error("AI provider error:", errorText);
+
+        return res.status(502).json({
+          error: "AI provider request failed.",
+          details: errorText.slice(0, 1000)
+        });
+      }
+
+      const delay = getRetryDelay(errorText, attempt);
+
+      console.log(
+        `AI provider temporarily unavailable. Retry ${
+          attempt + 1
+        }/2 after ${Math.round(delay / 1000)} seconds.`
+      );
+
+      await wait(delay);
     }
 
     const data = await response.json();
+
     const content = data?.choices?.[0]?.message?.content;
 
     if (!content) {

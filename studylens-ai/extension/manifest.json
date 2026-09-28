@@ -9,9 +9,7 @@
     "storage",
     "activeTab"
   ],
-  "host_permissions": [
-    "http://localhost:5000/*"
-  ],
+  "host_permissions": ["https://studylens-ai-9fia.onrender.com/*"],
   "background": {
     "service_worker": "background.js"
   },

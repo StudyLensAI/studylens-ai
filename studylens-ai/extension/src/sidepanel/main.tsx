@@ -9,7 +9,7 @@ type Result = {
   topic: string;
 };
 
-const API_URL = "http://localhost:5000/api/solve";
+const API_URL = "https://studylens-ai-9fia.onrender.com/api/solve";
 
 function App() {
   const [question, setQuestion] = useState("");
